@@ -39,11 +39,43 @@ app.get('/screams', (req, res) => {
     }).catch((err) => console.error(err));
 });
 
+const FBAuth = (req, res, next) => {
+    let idToken;
+    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
+        idToken = req.headers.authorization.split('Bearer ')[1];
+    } else {
+        console.error('No token found');
+        return res.status(403).json({ error: 'Unauthorized' });
+    }
 
-app.post('/screams', (req, res) => {
+    // it is not enough that there is a token, we need to actually verify that this token was issued by 
+    // our app. and not from somewhere else.
+    admin.auth().verifyIdToken(idToken).then(decodedToken => {
+        // this decoded token holds the data that is inside of our token and which is going to be user
+        // data so we need to add this data to our request object so that when this request proceeds 
+        // forward to 'POST /screams' our request there will have extra data that we have added from this
+        // middleware in this case it is going to be user data
+        req.user = decodedToken;
+        console.log(decodedToken);
+        return db.collection('users').where('userId', '==', req.user.uid).limit(1).get();
+    }).then(data => {
+        req.user.handle = data.docs[0].data().handle;
+        return next();
+    }).catch(err => {
+        // if the token is either expired or blacklisted or from any other issue
+        console.error('Error while verifying token', err);
+        return res.status(403).json(err);
+    });
+}
+
+app.post('/screams', FBAuth, (req, res) => {
+    if (req.body.body.trim() === '') {
+        return res.status(400).json({ body: 'Body must not be empty' });
+    }
+
     const newScream = {
         body: req.body.body,
-        userHandle: req.body.userHandle,
+        userHandle: req.user.handle,
         createdAt: new Date().toDateString()
     };
 
